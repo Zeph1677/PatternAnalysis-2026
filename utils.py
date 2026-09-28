@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,14 @@ def hard_segmentation_metrics(
 
 def write_json(path: str | Path, value: Any) -> None:
     """Write structured evidence with non-finite floats represented as null."""
+    def sanitise(item: Any) -> Any:
+        if isinstance(item, float) and not math.isfinite(item):
+            return None
+        if isinstance(item, dict):
+            return {key: sanitise(child) for key, child in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [sanitise(child) for child in item]
+        return item
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(value, indent=2, allow_nan=False), encoding="utf-8")
+    destination.write_text(json.dumps(sanitise(value), indent=2, allow_nan=False), encoding="utf-8")

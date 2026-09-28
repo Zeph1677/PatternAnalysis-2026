@@ -1,6 +1,7 @@
 import torch
+import json
 
-from utils import hard_segmentation_metrics
+from utils import hard_segmentation_metrics, write_json
 
 
 def test_perfect_prediction_has_unit_dice_and_iou():
@@ -24,3 +25,8 @@ def test_absent_class_is_excluded_from_macro_average():
 
     assert metrics["classes_present"] == [0]
     assert metrics["mean_dice"] == 1.0
+
+
+def test_json_writer_replaces_non_finite_metrics_with_null(tmp_path):
+    write_json(tmp_path / "metrics.json", {"absent_dice": float("nan")})
+    assert json.loads((tmp_path / "metrics.json").read_text()) == {"absent_dice": None}
