@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dataset import build_subject_split_manifest, discover_pairs
+from dataset import SegmentationDataset, build_subject_split_manifest, discover_pairs
 
 
 def _write_pair(root: Path, subject: str, slice_number: int) -> None:
@@ -31,3 +31,17 @@ def test_pair_discovery_rejects_missing_mask(tmp_path: Path):
     Image.fromarray(np.zeros((8, 8), dtype=np.uint8)).save(tmp_path / "case_001_slice_0.png")
     with pytest.raises(ValueError, match="missing mask"):
         discover_pairs(tmp_path)
+
+
+def test_pair_discovery_searches_nested_image_and_mask_directories(tmp_path: Path):
+    images = tmp_path / "images"; masks = tmp_path / "masks"; images.mkdir(); masks.mkdir()
+    Image.fromarray(np.zeros((8, 8), dtype=np.uint8)).save(images / "case_101_slice_0.nii.png")
+    Image.fromarray(np.zeros((8, 8), dtype=np.uint8)).save(masks / "seg_101_slice_0.nii.png")
+    assert discover_pairs(tmp_path)[0]["subject_id"] == "101"
+
+
+def test_dataset_remaps_hypermri_mask_codes_to_class_indices(tmp_path: Path):
+    image = np.zeros((2, 2), dtype=np.uint8); mask = np.array([[0, 85], [170, 255]], dtype=np.uint8)
+    Image.fromarray(image).save(tmp_path / "case_001_slice_0.png"); Image.fromarray(mask).save(tmp_path / "seg_001_slice_0.png")
+    _, target, _ = SegmentationDataset(discover_pairs(tmp_path))[0]
+    assert target.tolist() == [[0, 1], [2, 3]]

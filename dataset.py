@@ -26,8 +26,8 @@ def _key_and_subject(path: Path, image_prefix: str, mask_prefix: str) -> tuple[s
 def discover_pairs(root: str | Path, image_prefix: str = "case_", mask_prefix: str = "seg_") -> list[dict[str, str]]:
     """Return aligned PNG image/mask pairs and their subject identifiers."""
     directory = Path(root)
-    images = {path.stem[len(image_prefix) :]: path for path in directory.glob(f"{image_prefix}*.png")}
-    masks = {path.stem[len(mask_prefix) :]: path for path in directory.glob(f"{mask_prefix}*.png")}
+    images = {path.stem[len(image_prefix) :]: path for path in directory.rglob(f"{image_prefix}*.png")}
+    masks = {path.stem[len(mask_prefix) :]: path for path in directory.rglob(f"{mask_prefix}*.png")}
     missing = sorted(set(images) - set(masks))
     if missing:
         raise ValueError(f"missing mask for image keys: {missing[:3]}")
@@ -71,6 +71,13 @@ class SegmentationDataset(Dataset[tuple[torch.Tensor, torch.Tensor, dict[str, st
         record = self.records[index]
         image = np.asarray(Image.open(record["image"]).convert("L"), dtype=np.float32)
         mask = np.asarray(Image.open(record["mask"]), dtype=np.int64)
+        # HipMRI stores four semantic labels as display intensities; OASIS class maps are already 0..3.
+        hipmri_codes = {0: 0, 85: 1, 170: 2, 255: 3}
+        observed = set(np.unique(mask).tolist())
+        if observed.issubset(hipmri_codes):
+            mask = np.vectorize(hipmri_codes.__getitem__)(mask).astype(np.int64)
+        elif not observed.issubset({0, 1, 2, 3}):
+            raise ValueError(f"unsupported mask labels {sorted(observed)} for {record['case_id']}")
         if image.shape != mask.shape:
             raise ValueError(f"unaligned image/mask shapes for {record['case_id']}")
         scale = max(float(image.std()), 1e-6)
