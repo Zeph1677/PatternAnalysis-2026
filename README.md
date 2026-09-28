@@ -17,4 +17,3 @@ In the recognition folder, you will find many recognition problems solved includ
 * Stable diffusion
 * transformers
 etc.
-
