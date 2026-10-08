@@ -15,20 +15,26 @@ from modules import BaselineUNet, ImprovedUNet
 
 
 def error_overlay(prediction: np.ndarray, target: np.ndarray) -> np.ndarray:
-    """Colour false positives red and false negatives blue."""
+    """Colour false positives red, false negatives blue, and wrong tissue classes yellow."""
     overlay = np.zeros((*target.shape, 3), dtype=np.uint8)
     overlay[(prediction != 0) & (target == 0)] = (255, 0, 0)
     overlay[(prediction == 0) & (target != 0)] = (0, 0, 255)
+    overlay[(prediction != 0) & (target != 0) & (prediction != target)] = (255, 255, 0)
     return overlay
+
+
+def limit_prediction_records(records: list[dict[str, str]], maximum: int) -> list[dict[str, str]]:
+    """Limit smoke-test panels deterministically; zero evaluates every held-out case."""
+    return records if maximum == 0 else records[:maximum]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create OASIS inference/error panels")
     parser.add_argument("--data-root", required=True); parser.add_argument("--checkpoint", required=True); parser.add_argument("--output-dir", default="artifacts/predictions")
-    parser.add_argument("--seed", type=int, default=42); args = parser.parse_args()
+    parser.add_argument("--seed", type=int, default=42); parser.add_argument("--max-cases", type=int, default=0); args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu"); payload = torch.load(args.checkpoint, map_location=device, weights_only=True)
     model = (BaselineUNet if payload["model"] == "baseline" else ImprovedUNet)(num_classes=payload["num_classes"]).to(device); model.load_state_dict(payload["state_dict"]); model.eval()
-    records = build_subject_split_manifest(discover_pairs(args.data_root), args.seed)["test"]; output = Path(args.output_dir); output.mkdir(parents=True, exist_ok=True)
+    records = limit_prediction_records(build_subject_split_manifest(discover_pairs(args.data_root), args.seed)["test"], args.max_cases); output = Path(args.output_dir); output.mkdir(parents=True, exist_ok=True)
     failures = []
     for image, target, record in DataLoader(SegmentationDataset(records), batch_size=1, shuffle=False):
         with torch.no_grad(): prediction = model(image.to(device)).argmax(1).cpu().numpy()[0]

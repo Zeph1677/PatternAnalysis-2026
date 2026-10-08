@@ -26,6 +26,21 @@ def composite_segmentation_loss(logits: torch.Tensor, target: torch.Tensor, num_
     return ce + (1 - (numerator / denominator).mean())
 
 
+def count_trainable_parameters(model: nn.Module) -> int:
+    """Return the exact number of trainable scalar parameters."""
+    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+
+
+def limit_records(records: list[dict[str, str]], maximum: int) -> list[dict[str, str]]:
+    """Limit a smoke test deterministically; zero retains the complete split."""
+    return records if maximum == 0 else records[:maximum]
+
+
+def history_row(metrics: dict) -> dict:
+    """Keep scalar epoch evidence separate from nested class metrics."""
+    return {key: value for key, value in metrics.items() if key not in {"per_class", "classes_present"}}
+
+
 @torch.no_grad()
 def evaluate_batches(model: nn.Module, batches, device: torch.device, num_classes: int) -> dict:
     model.eval(); logits_all = []; targets_all = []; started = time.perf_counter()
@@ -46,9 +61,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train OASIS baseline or Improved U-Net")
     parser.add_argument("--data-root", required=True); parser.add_argument("--model", choices=("baseline", "improved"), required=True)
     parser.add_argument("--output-dir", default="artifacts"); parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--batch-size", type=int, default=8); parser.add_argument("--seed", type=int, default=42); parser.add_argument("--num-classes", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=8); parser.add_argument("--seed", type=int, default=42); parser.add_argument("--num-classes", type=int, default=4); parser.add_argument("--max-cases-per-split", type=int, default=0)
     args = parser.parse_args(); seed_everything(args.seed); device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    manifest = build_subject_split_manifest(discover_pairs(args.data_root), args.seed)
+    manifest = {name: limit_records(records, args.max_cases_per_split) for name, records in build_subject_split_manifest(discover_pairs(args.data_root), args.seed).items()}
     output = Path(args.output_dir) / args.model; output.mkdir(parents=True, exist_ok=True); write_json(output / "split_manifest.json", manifest)
     loaders = {name: _loader(rows, args.batch_size, name == "train") for name, rows in manifest.items()}
     model = (BaselineUNet if args.model == "baseline" else ImprovedUNet)(num_classes=args.num_classes).to(device)
@@ -62,10 +77,10 @@ def main() -> None:
         if validation["mean_dice"] > best:
             best = validation["mean_dice"]; torch.save({"model": args.model, "state_dict": model.state_dict(), "num_classes": args.num_classes}, output / "best.pt")
     checkpoint = torch.load(output / "best.pt", map_location=device, weights_only=True); model.load_state_dict(checkpoint["state_dict"])
-    results = evaluate_batches(model, ((x, y) for x, y, _ in loaders["test"]), device, args.num_classes); results.update({"model": args.model, "seed": args.seed, "test_cases": len(manifest["test"])})
+    results = evaluate_batches(model, ((x, y) for x, y, _ in loaders["test"]), device, args.num_classes); results.update({"model": args.model, "seed": args.seed, "test_cases": len(manifest["test"]), "trainable_parameters": count_trainable_parameters(model), "device": str(device), "torch_version": torch.__version__})
     write_json(output / "test_metrics.json", results)
     with (output / "history.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["epoch", "train_loss", "mean_dice", "mean_iou", "inference_seconds", "peak_vram_mb"]); writer.writeheader(); writer.writerows(history)
+        writer = csv.DictWriter(handle, fieldnames=["epoch", "train_loss", "mean_dice", "mean_iou", "inference_seconds", "peak_vram_mb"]); writer.writeheader(); writer.writerows(history_row(row) for row in history)
     print(results)
 
 
