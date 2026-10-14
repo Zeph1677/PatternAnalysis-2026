@@ -37,16 +37,34 @@ MRI slice -> normalisation -> encoder -> bottleneck -> decoder -> 4-class logits
 The specification lists OASIS at Rangpur path `/home/groups/comp3710/OASIS`. Never commit images, masks, checkpoints or credentials. The loader expects `case_<subject>_<slice>.png` paired with `seg_<subject>_<slice>.png`.
 
 ```powershell
+cd E:\vscode\PatternAnalysis-2026\recognition\oasis_brain_analysis
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-pytest -v
+python -m pytest -v
 python train.py --data-root /home/groups/comp3710/OASIS --model baseline --seed 42 --output-dir artifacts
-python train.py --data-root /home/groups/comp3710/OASIS --model improved --seed 42 --output-dir artifacts
-python predict.py --data-root /home/groups/comp3710/OASIS --checkpoint artifacts/improved/best.pt --seed 42 --output-dir artifacts/predictions
+python train.py --data-root /home/groups/comp3710/OASIS --model improved --seed 42 --split-manifest artifacts/baseline/split_manifest.json --output-dir artifacts
+python predict.py --data-root /home/groups/comp3710/OASIS --split-manifest artifacts/baseline/split_manifest.json --checkpoint artifacts/baseline/best.pt --comparison-checkpoint artifacts/improved/best.pt --output-dir artifacts/predictions --max-cases 5
 ```
 
-Replace the Rangpur path with the local PNG directory when running locally. Training writes `split_manifest.json`, `history.csv`, `test_metrics.json` and a checkpoint; prediction writes four-panel PNGs plus `failure_ranking.txt`.
+Replace the Rangpur path with the local PNG directory when running locally. Training writes `config.json`, `environment.json`, `split_manifest.json`, `history.csv`, `learning_curves.png`, `test_metrics.json`, `resource_profile.json` and a checkpoint. Formal prediction writes six-panel baseline/improved comparisons plus `failure_ranking.json`.
+
+### Rangpur formal experiment
+
+Upload the current local repository copy to the existing Rangpur project directory without using GitHub, then submit from the project directory:
+
+```bash
+chmod +x scripts/run_formal_experiment.slurm
+sbatch scripts/run_formal_experiment.slurm
+```
+
+The script uses `/home/groups/comp3710/OASIS`, 30 epochs, batch size 8 and seed 42 by default. Override only through recorded environment variables, for example `EPOCHS=40 BATCH_SIZE=4 sbatch scripts/run_formal_experiment.slurm`. It writes the job output beneath `~/oasis_formal_results/formal_<job-id>/`; retain `stdout.log`, `stderr.log`, `nvidia-smi.txt`, `pip_freeze.txt`, both model folders and `comparison_panels/`.
+
+After `sacct -j <job-id> --format=JobID,State,ExitCode,Elapsed,MaxRSS` reports `COMPLETED` and `0:0`, retrieve the exact folder before documenting any metric:
+
+```powershell
+scp -r <uq-username>@<rangpur-host>:~/oasis_formal_results/formal_<job-id> .\formal_results\<job-id>
+```
 
 ## Experimental protocol, results and failures
 
@@ -60,6 +78,15 @@ Train both models with the same seed and saved subject-level manifest. Select by
 
 No final deployment recommendation is warranted before real result files and 3-5 panels exist. Red overlay pixels are false positives; blue pixels are false negatives. Record the case ID, tissue class, local trigger, FP/FN pattern and recommended human-review action for each analysed failure.
 
+### Completion gates outside this repository
+
+- Present the one-page feasibility review at the tutor consultation and record the date plus feedback.
+- Confirm Blackboard's 2026 due date, submission target and review-response deadline.
+- Verify each retrieved result number against its `test_metrics.json` and `resource_profile.json`, then replace the pending table cells and add the five case IDs.
+- Create the required upstream pull request only when you choose to publish the verified local commits.
+- Export the matching README revision to PDF, submit it to Turnitin and retain the receipt.
+- Respond to teaching-team GitHub review with evidence-backed commits and replies after the PR exists.
+
 ### Real-data smoke-test evidence (not a final experiment)
 
 On 9 October 2026, the local OASIS PNG source was audited successfully: 11,328 aligned image/mask pairs, 256x256 slices and four remapped label classes. The fixed seed created 247/53/54 train/validation/test subjects. A GPU smoke test ran one baseline epoch with eight slices per split on an NVIDIA GeForce RTX 3060 Laptop GPU (PyTorch 2.11.0+cu128). It wrote a checkpoint, manifest, CSV, held-out JSON and eight prediction panels. Its held-out mean Dice was 0.0182 and mean IoU was 0.0094; the eight visualised cases had pixel error rates of 96.1-96.5%. These deliberately small-run values demonstrate the pipeline and failure reporting path only. They are not a model-quality claim and do not approach the course Dice target.
@@ -70,7 +97,7 @@ The smoke result establishes that a complete experiment must train both models o
 
 `modules.py` contains models; `dataset.py` handles pairing/splitting/loading; `train.py` trains and evaluates; `predict.py` creates error panels; `utils.py` provides metrics and reproducibility; `tests/` contains focused behavioural checks.
 
-An AI coding assistant assisted with scaffolding, test-first implementation drafts and documentation language. The author must audit every line, run tests and training, inspect outputs, verify metrics from saved artifacts, and revise any conclusion unsupported by evidence.
+An AI coding assistant assisted with implementation planning, test-first code drafts, documentation language and command construction. The author must audit every changed line, run and inspect the local tests, review Rangpur logs and saved artifacts, verify every reported metric against the relevant JSON/CSV output, select no result solely because it appears favourable, and revise any conclusion unsupported by evidence.
 
 ## References
 

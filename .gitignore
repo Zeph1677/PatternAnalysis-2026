@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 data/
 artifacts/
+formal_results/
 checkpoints/
 *.pt
 *.pth
