@@ -60,6 +60,33 @@ def build_subject_split_manifest(
     return {name: [item for subject in member_ids for item in grouped[subject]] for name, member_ids in allocations.items()}
 
 
+def validate_subject_split_manifest(
+    manifest: dict[str, list[dict[str, str]]], data_root: str | Path
+) -> dict[str, list[dict[str, str]]]:
+    """Validate that a saved manifest remains complete, local, and subject-disjoint."""
+    root = Path(data_root).resolve()
+    seen_subjects: dict[str, str] = {}
+    required = {"image", "mask", "subject_id", "case_id"}
+    for partition in ("train", "validation", "test"):
+        records = manifest.get(partition)
+        if not records:
+            raise ValueError(f"manifest partition {partition!r} is missing or empty")
+        for record in records:
+            missing = required - record.keys()
+            if missing:
+                raise ValueError(f"manifest record is missing fields: {sorted(missing)}")
+            subject = record["subject_id"]
+            existing = seen_subjects.get(subject)
+            if existing is not None and existing != partition:
+                raise ValueError(f"subject {subject!r} appears in multiple partitions")
+            seen_subjects[subject] = partition
+            for key in ("image", "mask"):
+                path = Path(record[key]).resolve()
+                if not path.is_file() or root not in path.parents:
+                    raise ValueError(f"manifest {key} is outside data root or missing: {path}")
+    return manifest
+
+
 class SegmentationDataset(Dataset[tuple[torch.Tensor, torch.Tensor, dict[str, str]]]):
     def __init__(self, records: list[dict[str, str]]) -> None:
         self.records = records
@@ -71,11 +98,11 @@ class SegmentationDataset(Dataset[tuple[torch.Tensor, torch.Tensor, dict[str, st
         record = self.records[index]
         image = np.asarray(Image.open(record["image"]).convert("L"), dtype=np.float32)
         mask = np.asarray(Image.open(record["mask"]), dtype=np.int64)
-        # HipMRI stores four semantic labels as display intensities; OASIS class maps are already 0..3.
-        hipmri_codes = {0: 0, 85: 1, 170: 2, 255: 3}
+        # The course OASIS PNG export may store four tissue labels as display intensities.
+        oasis_display_codes = {0: 0, 85: 1, 170: 2, 255: 3}
         observed = set(np.unique(mask).tolist())
-        if observed.issubset(hipmri_codes):
-            mask = np.vectorize(hipmri_codes.__getitem__)(mask).astype(np.int64)
+        if observed.issubset(oasis_display_codes):
+            mask = np.vectorize(oasis_display_codes.__getitem__)(mask).astype(np.int64)
         elif not observed.issubset({0, 1, 2, 3}):
             raise ValueError(f"unsupported mask labels {sorted(observed)} for {record['case_id']}")
         if image.shape != mask.shape:

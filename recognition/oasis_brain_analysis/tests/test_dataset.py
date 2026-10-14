@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dataset import SegmentationDataset, build_subject_split_manifest, discover_pairs
+from dataset import SegmentationDataset, build_subject_split_manifest, discover_pairs, validate_subject_split_manifest
 
 
 def _write_pair(root: Path, subject: str, slice_number: int) -> None:
@@ -12,6 +12,16 @@ def _write_pair(root: Path, subject: str, slice_number: int) -> None:
     mask = np.zeros((8, 8), dtype=np.uint8)
     Image.fromarray(image).save(root / f"case_{subject}_slice_{slice_number}.png")
     Image.fromarray(mask).save(root / f"seg_{subject}_slice_{slice_number}.png")
+
+
+def _record(root: Path, subject: str) -> dict[str, str]:
+    _write_pair(root, subject, 0)
+    return {
+        "image": str(root / f"case_{subject}_slice_0.png"),
+        "mask": str(root / f"seg_{subject}_slice_0.png"),
+        "subject_id": subject,
+        "case_id": f"{subject}_slice_0",
+    }
 
 
 def test_pair_discovery_and_subject_split_are_deterministic(tmp_path: Path):
@@ -45,3 +55,15 @@ def test_dataset_remaps_hypermri_mask_codes_to_class_indices(tmp_path: Path):
     Image.fromarray(image).save(tmp_path / "case_001_slice_0.png"); Image.fromarray(mask).save(tmp_path / "seg_001_slice_0.png")
     _, target, _ = SegmentationDataset(discover_pairs(tmp_path))[0]
     assert target.tolist() == [[0, 1], [2, 3]]
+
+
+def test_manifest_validator_rejects_subject_in_two_partitions(tmp_path: Path):
+    first = _record(tmp_path, "001")
+    manifest = {"train": [first], "validation": [first], "test": [_record(tmp_path, "002")]}
+    with pytest.raises(ValueError, match="multiple partitions"):
+        validate_subject_split_manifest(manifest, tmp_path)
+
+
+def test_manifest_validator_returns_valid_records(tmp_path: Path):
+    manifest = {"train": [_record(tmp_path, "001")], "validation": [_record(tmp_path, "002")], "test": [_record(tmp_path, "003")]}
+    assert validate_subject_split_manifest(manifest, tmp_path) == manifest
