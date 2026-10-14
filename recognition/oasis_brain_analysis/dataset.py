@@ -53,7 +53,7 @@ def build_subject_split_manifest(
     if len(subjects) < 3:
         raise ValueError("at least three subjects are required for train/validation/test")
     random.Random(seed).shuffle(subjects)
-    train_end = max(1, int(len(subjects) * train_fraction))
+    train_end = min(max(1, int(len(subjects) * train_fraction)), len(subjects) - 2)
     validation_end = max(train_end + 1, int(len(subjects) * (train_fraction + val_fraction)))
     validation_end = min(validation_end, len(subjects) - 1)
     allocations = {"train": subjects[:train_end], "validation": subjects[train_end:validation_end], "test": subjects[validation_end:]}

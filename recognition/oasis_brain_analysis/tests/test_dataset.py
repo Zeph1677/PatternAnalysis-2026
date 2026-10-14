@@ -37,6 +37,13 @@ def test_pair_discovery_and_subject_split_are_deterministic(tmp_path: Path):
     assert not (subjects["train"] & subjects["test"])
 
 
+def test_subject_split_keeps_all_three_partitions_nonempty_at_minimum_size(tmp_path: Path):
+    for subject in ("001", "002", "003"):
+        _write_pair(tmp_path, subject, 0)
+    manifest = build_subject_split_manifest(discover_pairs(tmp_path), seed=7)
+    assert all(manifest[partition] for partition in ("train", "validation", "test"))
+
+
 def test_pair_discovery_rejects_missing_mask(tmp_path: Path):
     Image.fromarray(np.zeros((8, 8), dtype=np.uint8)).save(tmp_path / "case_001_slice_0.png")
     with pytest.raises(ValueError, match="missing mask"):
