@@ -1,4 +1,8 @@
-# OASIS Brain Tissue Segmentation with an Improved 2D U-Net
+# OASIS Brain Analysis Project
+
+## Current implemented module
+
+The current repository module is **2D brain tissue segmentation**: a baseline 2D U-Net is compared with an improved 2D U-Net on the OASIS PNG data. The directory name intentionally leaves room for later OASIS analysis modules; it does not claim that 3D segmentation, VAE, GAN, or any other extension is already implemented.
 
 ## Project and engineering question
 
