@@ -9,7 +9,7 @@
 # Run both OASIS models on one saved subject-disjoint manifest.
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DATA_ROOT="${DATA_ROOT:-/home/groups/comp3710/OASIS}"
 FORMAL_OUTPUT_ROOT="${FORMAL_OUTPUT_ROOT:-${HOME}/oasis_formal_results}"
 EPOCHS="${EPOCHS:-30}"
