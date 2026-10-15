@@ -73,7 +73,26 @@ def main():
     history, dsc = make_curve(); best = int(np.argmax(history["val_mean_dsc"]))
     doc = Document(); margins(doc.sections[0]); normal = doc.styles["Normal"]; normal.font.name = "Aptos"
     normal._element.rPr.rFonts.set(qn("w:ascii"), "Aptos"); normal._element.rPr.rFonts.set(qn("w:hAnsi"), "Aptos")
-    title(doc, "From 2D Segmentation to HipMRI 3D", "COMP3710 progress evidence and Hard project feasibility review")
+    title(doc, "HipMRI 3D Prostate Segmentation Feasibility Review", "COMP3710 Hard difficulty 3D Improved U Net with residual units and deep supervision")
+    overview = doc.add_table(rows=2, cols=3)
+    overview_items = [("Dataset", "HipMRI 3D NIfTI volumes"), ("Difficulty", "Hard"), ("Target", "Prostate Dice at least 0.70"), ("Baseline", "Plain 3D U Net"), ("Proposed", "3D Improved U Net"), ("Split", "Patient disjoint; seed 42")]
+    for cell, (label, value) in zip((cell for row in overview.rows for cell in row.cells), overview_items):
+        shade(cell, "EAF2F8"); cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(f"{label}\n{value}"); r.font.size = Pt(8.3); r.bold = True
+    heading(doc, "User need scope and decision requested")
+    body(doc, "A radiotherapy contouring specialist needs a reviewable 3D draft of prostate and organ-at-risk boundaries. The engineering question is whether volumetric context, residual units and deep supervision reduce apex, base, cross-slice discontinuity and bladder or rectum boundary errors enough to justify higher GPU memory and runtime. I request confirmation that this Hard HipMRI 3D scope and resource plan are appropriate before full training.")
+    heading(doc, "Method and acceptance criteria")
+    body(doc, "The comparison uses a plain 3D U-Net baseline and a 3D Improved U-Net with volumetric residual units and decoder deep supervision. Both use one saved patient-level train, validation and test manifest. Acceptance evidence is: zero patient overlap; aligned NIfTI image-mask volumes; held-out prostate Dice at least 0.70; per-class Dice/IoU, peak VRAM and per-patient inference time; and 3-5 real failure cases with false-positive and false-negative overlays.")
+    heading(doc, "Preliminary feasibility evidence")
+    body(doc, "Local synthetic-NIfTI tests currently verify recursive image-mask pairing, missing-pair rejection, 3D shape and affine validation, deterministic patient-disjoint splitting, finite 3D forward/backward passes, residual deep-supervision outputs, validation-only checkpoint selection and held-out metric fields. This establishes the software path only. HipMRI data audit, GPU smoke measurement and final Dice values are not yet claimed.")
+    heading(doc, "Risks budget and fallback")
+    body(doc, "Main risks are 3D volume memory demand, small foreground regions, NIfTI orientation errors, slow I/O and failed cluster jobs. The next experiment is a short Rangpur GPU smoke run on audited volumes to set patch geometry, batch size and mixed-precision settings, followed by matched Slurm runs. If the improved model does not improve real held-out boundary failures at acceptable cost, the plain 3D U-Net remains the fallback recommendation.")
+    heading(doc, "Questions for tutor confirmation")
+    body(doc, "1. Confirm the Hard HipMRI 3D Improved U-Net scope and patient-level evaluation protocol.  2. Confirm whether the prostate Dice >= 0.70 target is assessed with background reported separately.  3. Confirm the expected GPU budget, patch strategy and midpoint evidence required before full training.")
+
+    section_2d = doc.add_section(WD_SECTION.NEW_PAGE); margins(section_2d)
+    title(doc, "Completed 2D Segmentation Evidence", "OASIS brain MRI slice segmentation completed before the HipMRI 3D stage")
     body(doc, "The 2D stage is complete and provides a verified segmentation pipeline, trained checkpoint and held-out visual evidence. The next stage changes dataset and clinical target: HipMRI volumetric prostate segmentation using matched plain and improved 3D U-Nets.")
     heading(doc, "Completed 2D result")
     table = doc.add_table(rows=1, cols=4)
@@ -101,8 +120,14 @@ def main():
     body(doc, "A short smoke run will determine patch size, batch size and mixed precision before full Slurm jobs. If the improved model does not reduce real held-out errors at acceptable cost, the plain 3D U-Net remains the fallback.")
     heading(doc, "Tutor confirmation requested")
     body(doc, "Please confirm the HipMRI label encoding, whether background is excluded from reported Dice, recommended patch and batch settings, compute budget, and required logs, checkpoints and failure panels.")
-    footer = doc.sections[0].footer.paragraphs[0]; footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = footer.add_run("COMP3710 progress review - 2D evidence is OASIS; 3D performance remains to be measured on HipMRI."); r.font.size = Pt(7.1); r.font.color.rgb = RGBColor(89, 89, 89)
+    first_footer = doc.sections[0].footer
+    first_footer.is_linked_to_previous = False
+    p = first_footer.paragraphs[0]; p.clear(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("Prepared from the COMP3710 project brief and local implementation checks. Tutor confirmation remains required."); r.font.size = Pt(7.1); r.font.color.rgb = RGBColor(89, 89, 89)
+    for later in doc.sections[1:]:
+        later.footer.is_linked_to_previous = False
+        p = later.footer.paragraphs[0]; p.clear(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run("COMP3710 progress review - 2D evidence is OASIS; 3D performance remains to be measured on HipMRI."); r.font.size = Pt(7.1); r.font.color.rgb = RGBColor(89, 89, 89)
     doc.save(OUTPUT); print(OUTPUT)
 
 if __name__ == "__main__": main()
