@@ -51,9 +51,10 @@ Replace the Rangpur path with the local PNG directory when running locally. Trai
 
 ### Rangpur formal experiment
 
-Upload the current local repository copy to the existing Rangpur project directory without using GitHub, then submit from the project directory:
+Upload the current local project files to `~/oasis_brain_analysis` on Rangpur without using GitHub, then submit from that exact directory:
 
 ```bash
+cd ~/oasis_brain_analysis
 chmod +x scripts/run_formal_experiment.slurm
 sbatch scripts/run_formal_experiment.slurm
 ```
