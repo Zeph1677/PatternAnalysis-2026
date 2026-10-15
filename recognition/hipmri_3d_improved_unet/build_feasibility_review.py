@@ -87,7 +87,7 @@ def main() -> None:
     _body(doc, "Main risks are 3D volume memory demand, small foreground regions, NIfTI orientation errors, slow I/O and failed cluster jobs. The next experiment is a short Rangpur GPU smoke run on audited volumes to set patch geometry, batch size and mixed-precision settings, followed by matched Slurm runs. If the improved model does not improve real held-out boundary failures at acceptable cost, the plain 3D U-Net remains the fallback recommendation.")
 
     _heading(doc, "Questions for tutor confirmation")
-    _body(doc, "1. Confirm the Hard HipMRI 3D Improved U-Net scope and patient-level evaluation protocol.  2. Confirm whether the prostate Dice >= 0.70 target is assessed with background reported separately.  3. Confirm the expected GPU budget, patch strategy and midpoint evidence required before full training.")
+    _body(doc, "1. What is the HipMRI prostate-label encoding, and is background reported separately?  2. What is the exact calculation protocol for Dice >= 0.70?  3. What patch size, batch size, mixed-precision setting and epoch budget do you recommend?  4. Which logs, checkpoints and base/apex failure panels must be retained after the midpoint?  5. Will this practical be recorded as the completed check-off?")
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER

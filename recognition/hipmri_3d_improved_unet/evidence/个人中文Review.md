@@ -45,9 +45,11 @@
 
 ## 必问问题
 
-1. HipMRI 3D Improved U-Net 的 Hard scope、prostate Dice >= 0.70 与 patient-level split 是否符合课程预期？
-2. prostate label 的实际编码是什么，background 是否单独报告但不计入 mean Dice？
-3. 是否建议特定 patch size、batch size、mixed precision、epoch budget，及 base/apex failure panels 的最低要求？
+1. HipMRI prostate label 的实际编码是什么？background 是否单独报告？
+2. Dice >= 0.70 的统计口径是什么？
+3. 推荐的 patch size、batch size、mixed precision 与 epoch budget 是什么？
+4. 中期后需要保存哪些日志、checkpoint 和 base/apex failure panels？
+5. 本次 practical 是否已经记录为完成 check-off？
 
 ## 导师记录模板
 
