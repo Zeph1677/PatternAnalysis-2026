@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=oasis-formal
 #SBATCH --partition=comp3710
-#SBATCH --gres=gpu:1
+#SBATCH --account=comp3710
+#SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=4
 #SBATCH --time=12:00:00
 
@@ -20,6 +21,8 @@ mkdir -p "${RUN_DIR}"
 exec > >(tee -a "${RUN_DIR}/stdout.log") 2> >(tee -a "${RUN_DIR}/stderr.log" >&2)
 
 cd "${PROJECT_DIR}"
+source "${HOME}/miniconda3/bin/activate"
+conda activate torch
 printf 'project_dir=%q\ndata_root=%q\nepochs=%q\nbatch_size=%q\nseed=%q\n' \
   "${PROJECT_DIR}" "${DATA_ROOT}" "${EPOCHS}" "${BATCH_SIZE}" "${SEED}" > "${RUN_DIR}/run_config.env"
 printf '%q ' "$@" > "${RUN_DIR}/slurm_arguments.txt"
