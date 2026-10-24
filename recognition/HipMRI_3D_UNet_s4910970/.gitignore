@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.vscode/
+
+data/
+
+# Generated training and inference outputs.
+artifacts/
+checkpoints/
+outputs/
+*.pt
+*.pth
+*.ckpt
