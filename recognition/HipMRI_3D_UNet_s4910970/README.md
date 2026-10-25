@@ -6,7 +6,7 @@ segmentation of downsampled pelvic MRI volumes. The project treats the
 prostate as the primary reporting structure while retaining the associated
 pelvic labels needed for multi-class learning.
 
-The project currently implements data preparation, model architectures and training. It makes no claim
+The project currently implements data preparation, models, training and prediction. It makes no claim
 about training completion, Dice performance, clinical suitability, or final
 assessment status.
 
@@ -57,8 +57,8 @@ interpolation; masks use nearest-neighbour interpolation. Multiple weekly scans
 from the same patient remain in the same partition.
 
 `modules.py` implements the baseline and Improved architectures.
-`train.py` implements training and validation. `predict.py` remains a placeholder
-for the next evaluation milestone.
+`train.py` implements training and validation. `predict.py` restores a selected
+checkpoint and evaluates reconstructed volumes from the test partition.
 
 ## Model architecture
 
