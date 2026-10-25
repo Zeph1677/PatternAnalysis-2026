@@ -6,7 +6,7 @@ segmentation of downsampled pelvic MRI volumes. The project treats the
 prostate as the primary reporting structure while retaining the associated
 pelvic labels needed for multi-class learning.
 
-The project currently implements the data preparation layer. It makes no claim
+The project currently implements data preparation and model architectures. It makes no claim
 about training completion, Dice performance, clinical suitability, or final
 assessment status.
 
@@ -32,7 +32,7 @@ tensors, or generated experiment outputs.
 
 ## Planned model comparison
 
-The baseline will be a volumetric 3D U-Net. A separate Improved model will be
+The baseline is a volumetric 3D U-Net. A separate Improved model will be
 evaluated against that baseline using the same dataset protocol. Later commits
 will document the implemented architecture, preprocessing, patient-level data
 split, loss function, checkpoint-selection rule, and held-out evaluation.
@@ -55,7 +55,36 @@ patient-level train/validation/test splits, z-score normalization, optional
 interpolation; masks use nearest-neighbour interpolation. Multiple weekly scans
 from the same patient remain in the same partition.
 
-`modules.py`, `train.py` and `predict.py` remain placeholders for later milestones.
+`modules.py` implements the baseline and Improved architectures.
+`train.py` and `predict.py` remain placeholders for later milestones.
+
+## Model architecture
+
+Both models use three encoder levels, max-pooling, a bottleneck and three
+decoder levels with transposed convolutions and concatenated encoder skips.
+Convolution blocks use two 3D convolutions, instance normalization and
+LeakyReLU. `BaselineUNet3D` uses these plain blocks; `ImprovedUNet3D` adds
+residual blocks, with a 1x1x1 projection when channel counts differ.
+
+The Improved model has two auxiliary decoder heads for training-time deep
+supervision. In training mode it returns final logits and the two lower-resolution
+auxiliary outputs. In evaluation mode both models return only final logits.
+The corresponding auxiliary loss will be implemented in the training milestone.
+
+Inputs have shape `(N, 1, D, H, W)`, with spatial dimensions divisible by eight.
+Use `num_classes=6` for the declared pelvic label set; the constructor default
+is two classes. Final logits have shape `(N, 6, D, H, W)` for that configuration.
+Architecture implementation does not establish a performance advantage.
+
+```python
+import torch
+from modules import BaselineUNet3D, ImprovedUNet3D
+
+model = ImprovedUNet3D(in_channels=1, num_classes=6, base_channels=16)
+model.eval()
+with torch.no_grad():
+    logits = model(torch.zeros(1, 1, 16, 16, 16))
+```
 
 ## Usage
 
@@ -71,8 +100,6 @@ relative paths and metadata. `build_patient_split_manifest(pairs, seed=42)`
 creates patient-disjoint partitions. `HipMRI3DDataset` loads a selected partition
 as image and mask tensors for the later training pipeline.
 
-The data layer is migrated from private development commit `4392d92` of
-`COMP3710-A1`. These commits record the staged migration of the project.
 
 ## References
 
