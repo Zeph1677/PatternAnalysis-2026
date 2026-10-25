@@ -6,7 +6,7 @@ segmentation of downsampled pelvic MRI volumes. The project treats the
 prostate as the primary reporting structure while retaining the associated
 pelvic labels needed for multi-class learning.
 
-The project currently implements data preparation and model architectures. It makes no claim
+The project currently implements data preparation, model architectures and training. It makes no claim
 about training completion, Dice performance, clinical suitability, or final
 assessment status.
 
@@ -48,6 +48,7 @@ guarantee that it outperforms the baseline.
 | `modules.py` | Define reusable neural-network modules and 3D U-Net architectures. |
 | `train.py` | Train and validate a declared model configuration. |
 | `predict.py` | Restore a selected checkpoint and generate prediction outputs and metrics. |
+| `utils.py` | Plot saved training histories and validation-selected epochs. |
 
 `dataset.py` now implements NIfTI pairing, geometry validation, deterministic
 patient-level train/validation/test splits, z-score normalization, optional
@@ -56,7 +57,8 @@ interpolation; masks use nearest-neighbour interpolation. Multiple weekly scans
 from the same patient remain in the same partition.
 
 `modules.py` implements the baseline and Improved architectures.
-`train.py` and `predict.py` remain placeholders for later milestones.
+`train.py` implements training and validation. `predict.py` remains a placeholder
+for the next evaluation milestone.
 
 ## Model architecture
 
@@ -69,7 +71,8 @@ residual blocks, with a 1x1x1 projection when channel counts differ.
 The Improved model has two auxiliary decoder heads for training-time deep
 supervision. In training mode it returns final logits and the two lower-resolution
 auxiliary outputs. In evaluation mode both models return only final logits.
-The corresponding auxiliary loss will be implemented in the training milestone.
+The training loss combines cross-entropy and soft Dice, adding each auxiliary
+loss with weight 0.25 after nearest-neighbour resizing of its mask target.
 
 Inputs have shape `(N, 1, D, H, W)`, with spatial dimensions divisible by eight.
 Use `num_classes=6` for the declared pelvic label set; the constructor default
@@ -91,7 +94,7 @@ with torch.no_grad():
 Run these commands from this project directory:
 
 ```powershell
-python -m pip install torch numpy nibabel
+python -m pip install torch numpy nibabel matplotlib
 ```
 
 The data root must contain `semantic_MRs/` and `semantic_labels_only/`.
@@ -99,6 +102,53 @@ The data root must contain `semantic_MRs/` and `semantic_labels_only/`.
 relative paths and metadata. `build_patient_split_manifest(pairs, seed=42)`
 creates patient-disjoint partitions. `HipMRI3DDataset` loads a selected partition
 as image and mask tensors for the later training pipeline.
+
+
+## Training
+
+Training consumes a fixed JSON manifest with `summary.labels` equal to
+`[0, 1, 2, 3, 4, 5]`, `splits` containing patient lists for `train`, `validation`
+and `test`, and a `cases` list. Each case records `case_id`, `patient_id`,
+relative `image_path` and `mask_path`, `shape`, `spacing`, `orientation`,
+`labels` and its `split`. The following example creates this input from separately obtained data:
+
+```python
+import json
+from dataclasses import asdict
+from pathlib import Path
+from dataset import discover_volume_pairs, build_patient_split_manifest
+
+pairs = discover_volume_pairs(Path('data/HipMRI_Study_open'))
+splits = build_patient_split_manifest(pairs, seed=42)
+partition = {patient: split for split in ('train', 'validation', 'test')
+             for patient in splits[split]}
+cases = []
+for pair in pairs:
+    record = asdict(pair)
+    record['image_path'] = pair.image_path.as_posix()
+    record['mask_path'] = pair.mask_path.as_posix()
+    record['split'] = partition[pair.patient_id]
+    cases.append(record)
+manifest = {
+    'summary': {'labels': sorted({v for p in pairs for v in p.labels})},
+    'splits': splits,
+    'cases': cases,
+}
+output = Path('artifacts/dataset_manifest.json')
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+```
+
+```powershell
+python train.py --manifest artifacts/dataset_manifest.json --data-root data/HipMRI_Study_open --output-dir artifacts/baseline_run --model baseline --epochs 20 --prostate-label 5 --prostate-label-source "CSIRO v2 DOI 10.25919/45T8-P065, Labels: 5=Prostate" --selection-metric prostate_dice
+```
+
+Use `--model improved` with a separate empty output directory for the comparison
+arm. Preserve the same manifest and all shared settings. The training process
+uses only train and validation partitions, saves a validation-selected `best.pt`,
+configuration, history, resource summary and training curves under the ignored
+output directory. Prostate-Dice selection uses patient-level validation scores;
+held-out test evaluation belongs to the later prediction milestone.
 
 
 ## References
