@@ -6,7 +6,7 @@ segmentation of downsampled pelvic MRI volumes. The project treats the
 prostate as the primary reporting structure while retaining the associated
 pelvic labels needed for multi-class learning.
 
-This initial commit establishes the project structure only. It makes no claim
+The project currently implements the data preparation layer. It makes no claim
 about training completion, Dice performance, clinical suitability, or final
 assessment status.
 
@@ -49,9 +49,30 @@ guarantee that it outperforms the baseline.
 | `train.py` | Train and validate a declared model configuration. |
 | `predict.py` | Restore a selected checkpoint and generate prediction outputs and metrics. |
 
-The four Python files in this commit are interface placeholders. They are not
-yet a runnable training system. Dependencies, commands, tests, results, and
-visualisations will be added with the corresponding implementation commits.
+`dataset.py` now implements NIfTI pairing, geometry validation, deterministic
+patient-level train/validation/test splits, z-score normalization, optional
+3D resizing and foreground-aware patch sampling. MRI resizing uses trilinear
+interpolation; masks use nearest-neighbour interpolation. Multiple weekly scans
+from the same patient remain in the same partition.
+
+`modules.py`, `train.py` and `predict.py` remain placeholders for later milestones.
+
+## Usage
+
+Run these commands from this project directory:
+
+```powershell
+python -m pip install torch numpy nibabel
+```
+
+The data root must contain `semantic_MRs/` and `semantic_labels_only/`.
+`discover_volume_pairs(data_root)` validates matched volumes and returns their
+relative paths and metadata. `build_patient_split_manifest(pairs, seed=42)`
+creates patient-disjoint partitions. `HipMRI3DDataset` loads a selected partition
+as image and mask tensors for the later training pipeline.
+
+The data layer is migrated from private development commit `4392d92` of
+`COMP3710-A1`. These commits record the staged migration of the project.
 
 ## References
 
