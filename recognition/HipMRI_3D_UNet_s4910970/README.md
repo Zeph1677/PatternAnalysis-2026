@@ -40,7 +40,7 @@ split, loss function, checkpoint-selection rule, and held-out evaluation.
 The word “Improved” will describe an implemented comparison model, not a
 guarantee that it outperforms the baseline.
 
-## Initial file layout
+## File layout
 
 | File | Intended responsibility |
 | --- | --- |
@@ -148,7 +148,53 @@ arm. Preserve the same manifest and all shared settings. The training process
 uses only train and validation partitions, saves a validation-selected `best.pt`,
 configuration, history, resource summary and training curves under the ignored
 output directory. Prostate-Dice selection uses patient-level validation scores;
-held-out test evaluation belongs to the later prediction milestone.
+held-out test evaluation is performed separately by `predict.py`.
+
+## Prediction and evaluation
+
+After training has selected a checkpoint using validation data, run:
+
+```powershell
+python predict.py --checkpoint artifacts/baseline_run/best.pt --manifest artifacts/dataset_manifest.json --data-root data/HipMRI_Study_open --output-dir artifacts/baseline_test --patch-size 128 128 128 --stride 64 64 64
+```
+
+The checkpoint restores its model type, channel width, class count and target
+geometry. The supplied manifest must have the same SHA-256 as the training
+manifest. Keep the manifest bytes unchanged between training and prediction.
+Prediction reads only its test patients, averages overlapping patch logits,
+then applies argmax after full-volume reconstruction. Patch dimensions must
+fit within the target volume and be divisible by eight; stride must be positive
+and no greater than the corresponding patch size.
+
+Each patient's score is the mean prostate Dice across that patient's scans.
+The headline metric is the arithmetic mean across patients. Supplementary Dice
+and IoU are averaged across scans for each non-background class. The output
+directory contains `test_metrics.json`, prediction tensors in `predictions/`
+and three-plane images in `failure_panels/`. These images use central slices;
+their FP/FN panels show foreground/background errors across all organs, rather
+than prostate-only errors or anatomically verified prostate-base slices.
+
+Use a separate empty output directory for every run. Training and prediction
+refuse to overwrite a non-empty output directory. Evaluate held-out data after
+freezing the model and shared settings; use validation data for configuration
+selection. Neither command supplies the raw data or pretrained weights.
+
+## Local execution check
+
+Both architectures completed a one-epoch CPU smoke run on temporary synthetic
+six-label NIfTI volumes with target geometry `16x16x16` and base channels 2.
+The check exercised data preparation, training, validation, checkpoint saving
+and loading, full-volume prediction, metric JSON and PNG output. It used this
+directory's modules and commands without private-repository imports. Temporary
+data and outputs were removed after verification; no test scripts are included
+in the submission directory.
+
+For a small execution check on separately obtained data, use `--epochs 1
+--base-channels 2 --target-shape 16 16 16 --device cpu` for training and
+`--patch-size 16 16 16 --stride 8 8 8 --device cpu` for prediction. These settings
+check execution only and are unsuitable for reporting segmentation quality.
+Real-data performance, GPU resource use and the final experiment settings
+remain to be documented in subsequent milestones.
 
 
 ## References
