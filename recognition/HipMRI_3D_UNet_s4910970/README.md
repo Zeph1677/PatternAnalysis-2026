@@ -44,6 +44,7 @@ guarantee that it outperforms the baseline.
 
 | File | Intended responsibility |
 | --- | --- |
+| `audit.py` | Validate paired volumes and write a deterministic patient-level manifest. |
 | `dataset.py` | Discover paired NIfTI images and masks, validate them, and expose datasets. |
 | `modules.py` | Define reusable neural-network modules and 3D U-Net architectures. |
 | `train.py` | Train and validate a declared model configuration. |
@@ -98,53 +99,31 @@ python -m pip install torch numpy nibabel matplotlib
 ```
 
 The data root must contain `semantic_MRs/` and `semantic_labels_only/`.
-`discover_volume_pairs(data_root)` validates matched volumes and returns their
-relative paths and metadata. `build_patient_split_manifest(pairs, seed=42)`
-creates patient-disjoint partitions. `HipMRI3DDataset` loads a selected partition
-as image and mask tensors for the later training pipeline.
+Create the audited, patient-disjoint manifest before training:
+
+```powershell
+python audit.py data/HipMRI_Study_open --output artifacts/dataset_manifest.json --seed 42
+```
+
+The audit verifies image-mask pairing and spatial metadata, records each case's
+split, and keeps all scans from one patient in the same partition. Both model
+arms must use the same unchanged manifest.
 
 
 ## Training
 
-Training consumes a fixed JSON manifest with `summary.labels` equal to
+Training consumes the fixed JSON manifest produced by `audit.py`, with `summary.labels` equal to
 `[0, 1, 2, 3, 4, 5]`, `splits` containing patient lists for `train`, `validation`
 and `test`, and a `cases` list. Each case records `case_id`, `patient_id`,
 relative `image_path` and `mask_path`, `shape`, `spacing`, `orientation`,
-`labels` and its `split`. The following example creates this input from separately obtained data:
-
-```python
-import json
-from dataclasses import asdict
-from pathlib import Path
-from dataset import discover_volume_pairs, build_patient_split_manifest
-
-pairs = discover_volume_pairs(Path('data/HipMRI_Study_open'))
-splits = build_patient_split_manifest(pairs, seed=42)
-partition = {patient: split for split in ('train', 'validation', 'test')
-             for patient in splits[split]}
-cases = []
-for pair in pairs:
-    record = asdict(pair)
-    record['image_path'] = pair.image_path.as_posix()
-    record['mask_path'] = pair.mask_path.as_posix()
-    record['split'] = partition[pair.patient_id]
-    cases.append(record)
-manifest = {
-    'summary': {'labels': sorted({v for p in pairs for v in p.labels})},
-    'splits': splits,
-    'cases': cases,
-}
-output = Path('artifacts/dataset_manifest.json')
-output.parent.mkdir(parents=True, exist_ok=True)
-output.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-```
+`labels` and its `split`.
 
 ```powershell
 python train.py --manifest artifacts/dataset_manifest.json --data-root data/HipMRI_Study_open --output-dir artifacts/baseline_run --model baseline --epochs 20 --prostate-label 5 --prostate-label-source "CSIRO v2 DOI 10.25919/45T8-P065, Labels: 5=Prostate" --selection-metric prostate_dice
 ```
 
-Use `--model improved` with a separate empty output directory for the comparison
-arm. Preserve the same manifest and all shared settings. The training process
+Use `--model improved --architecture-version improved_v1` with a separate empty
+output directory for the comparison arm. Preserve the same manifest and all shared settings. The training process
 uses only train and validation partitions, saves a validation-selected `best.pt`,
 configuration, history, resource summary and training curves under the ignored
 output directory. Prostate-Dice selection uses patient-level validation scores;
@@ -158,8 +137,8 @@ After training has selected a checkpoint using validation data, run:
 python predict.py --checkpoint artifacts/baseline_run/best.pt --manifest artifacts/dataset_manifest.json --data-root data/HipMRI_Study_open --output-dir artifacts/baseline_test --patch-size 128 128 128 --stride 64 64 64
 ```
 
-The checkpoint restores its model type, channel width, class count and target
-geometry. The supplied manifest must have the same SHA-256 as the training
+The checkpoint strictly restores its declared architecture version, model type,
+channel width, class count and target geometry. The supplied manifest must have the same SHA-256 as the training
 manifest. Keep the manifest bytes unchanged between training and prediction.
 Prediction reads only its test patients, averages overlapping patch logits,
 then applies argmax after full-volume reconstruction. Patch dimensions must
@@ -170,9 +149,11 @@ Each patient's score is the mean prostate Dice across that patient's scans.
 The headline metric is the arithmetic mean across patients. Supplementary Dice
 and IoU are averaged across scans for each non-background class. The output
 directory contains `test_metrics.json`, prediction tensors in `predictions/`
-and three-plane images in `failure_panels/`. These images use central slices;
-their FP/FN panels show foreground/background errors across all organs, rather
-than prostate-only errors or anatomically verified prostate-base slices.
+and three-plane images in `failure_panels/`. For each patient's lowest-Dice
+scan, the axial, coronal and sagittal views independently select the slice with
+the most prostate false-positive plus false-negative voxels. The selected case,
+indices and fallback rule are recorded in `failure_panel_selection`; these are
+error-focused views, not anatomically verified prostate base or apex slices.
 
 Use a separate empty output directory for every run. Training and prediction
 refuse to overwrite a non-empty output directory. Evaluate held-out data after

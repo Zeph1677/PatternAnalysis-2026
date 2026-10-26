@@ -15,7 +15,7 @@ import torch
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from modules import BaselineUNet3D, ImprovedUNet3D
+from modules import build_model
 from dataset import HipMRI3DDataset
 from train import load_audited_pairs
 
@@ -63,12 +63,8 @@ def load_checkpoint_model(checkpoint_path: Path | str, device: torch.device) -> 
     config = checkpoint.get("config")
     if not isinstance(config, dict):
         raise ValueError("checkpoint is missing experiment config")
-    model_name, num_classes, base_channels = config.get("model"), config.get("num_classes"), config.get("base_channels")
-    if model_name not in {"baseline", "improved"} or not isinstance(num_classes, int) or not isinstance(base_channels, int):
-        raise ValueError("checkpoint config does not declare a supported model")
-    model_type = BaselineUNet3D if model_name == "baseline" else ImprovedUNet3D
-    model = model_type(num_classes=num_classes, base_channels=base_channels).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model = build_model(config).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     model.eval()
     return model, config
 
@@ -93,6 +89,51 @@ def _class_metrics(prediction: torch.Tensor, target: torch.Tensor, num_classes: 
         denominator = int(predicted.sum() + actual.sum())
         result[str(label)] = {"dice": 2 * intersection / denominator if denominator else None, "iou": intersection / union if union else None}
     return result
+
+
+def prostate_error_masks(
+    label: torch.Tensor, prediction: torch.Tensor, prostate_label: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return prostate-specific false-positive and false-negative masks.
+
+    A prostate voxel confused with another foreground organ remains a false
+    negative, and another organ predicted as prostate remains a false positive.
+    """
+
+    if label.shape != prediction.shape:
+        raise ValueError("label and prediction must have identical shapes")
+    false_positive = (prediction == prostate_label) & (label != prostate_label)
+    false_negative = (label == prostate_label) & (prediction != prostate_label)
+    return false_positive, false_negative
+
+
+def prostate_error_slice_indices(
+    label: torch.Tensor, prediction: torch.Tensor, prostate_label: int
+) -> tuple[int, int, int]:
+    """Choose the prostate FP+FN maximum independently for axial/coronal/sagittal views.
+
+    If a volume has no prostate error, use the centre of the reference prostate
+    extent; if reference prostate is absent, use the geometric centre.
+    """
+
+    if label.ndim != 3 or prediction.ndim != 3:
+        raise ValueError("prostate error slice selection requires 3D volumes")
+    false_positive, false_negative = prostate_error_masks(label, prediction, prostate_label)
+    error = false_positive | false_negative
+    reference = label == prostate_label
+    indices: list[int] = []
+    for axis in range(3):
+        reduce_axes = tuple(dimension for dimension in range(3) if dimension != axis)
+        error_scores = error.sum(dim=reduce_axes)
+        reference_scores = reference.sum(dim=reduce_axes)
+        if int(error_scores.max()) > 0:
+            indices.append(int(error_scores.argmax()))
+        elif int(reference_scores.max()) > 0:
+            occupied = torch.nonzero(reference_scores > 0, as_tuple=False).flatten()
+            indices.append(int((occupied[0] + occupied[-1]).item() // 2))
+        else:
+            indices.append(label.shape[axis] // 2)
+    return tuple(indices)
 
 
 def _cuda_synchronize(device: torch.device) -> None:
@@ -127,7 +168,7 @@ def run_prediction(args: argparse.Namespace) -> dict[str, object]:
     if device.type == "cuda": torch.cuda.reset_peak_memory_stats(device)
     patient_scores: dict[str, list[float]] = {}
     patient_seconds: dict[str, list[float]] = {}
-    representative_cases: dict[str, tuple[float, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+    representative_cases: dict[str, tuple[float, str, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
     class_parts: dict[str, list[dict[str, float | None]]] = {str(label): [] for label in range(num_classes)}
     for pair in pairs:
         if pair.patient_id not in split_ids["test"]:
@@ -145,7 +186,7 @@ def run_prediction(args: argparse.Namespace) -> dict[str, object]:
         patient_seconds.setdefault(pair.patient_id, []).append(case_seconds)
         representative = representative_cases.get(pair.patient_id)
         if representative is None or case_score < representative[0]:
-            representative_cases[pair.patient_id] = (case_score, image[0].cpu(), target.cpu(), prediction)
+            representative_cases[pair.patient_id] = (case_score, pair.case_id, image[0].cpu(), target.cpu(), prediction)
         for label, values in _class_metrics(prediction, target, num_classes).items():
             class_parts[label].append(values)
     per_patient = {patient: sum(scores) / len(scores) for patient, scores in patient_scores.items()}
@@ -154,13 +195,28 @@ def run_prediction(args: argparse.Namespace) -> dict[str, object]:
     metrics = build_test_metrics(per_patient, per_class, prostate_label)
     panel_dir = output / "failure_panels"
     panel_files = []
+    failure_panel_selection: dict[str, dict[str, object]] = {}
     for failure in metrics["failure_ranking"]:
         patient_id = failure["patient_id"]
-        _, image, target, prediction = representative_cases[patient_id]
+        _, case_id, image, target, prediction = representative_cases[patient_id]
+        slice_indices = prostate_error_slice_indices(target, prediction, prostate_label)
         panel_path = panel_dir / f"{patient_id}.png"
-        render_case_views(image, target, prediction, panel_path, title=f"{patient_id}: patient prostate Dice={failure['prostate_dice']:.4f}")
+        render_case_views(
+            image,
+            target,
+            prediction,
+            panel_path,
+            title=f"{patient_id} {case_id}: patient prostate Dice={failure['prostate_dice']:.4f}",
+            prostate_label=prostate_label,
+            slice_indices=slice_indices,
+        )
         panel_files.append(str(panel_path.relative_to(output)))
-    metrics.update({"checkpoint": str(args.checkpoint), "manifest_sha256": manifest_hash, "prostate_label_source": config["prostate_label_source"], "target_shape": config["target_shape"], "patch_size": list(patch_size), "stride": list(stride), "overlap": overlap, "logit_merge_method": "overlap_averaged_logits", "per_patient_inference_seconds": per_patient_seconds, "total_inference_seconds": sum(per_patient_seconds.values()), "mean_patient_inference_seconds": sum(per_patient_seconds.values()) / len(per_patient_seconds), "peak_inference_vram_mb": torch.cuda.max_memory_allocated(device) / 1024**2 if device.type == "cuda" else 0.0, "failure_panels": panel_files})
+        failure_panel_selection[patient_id] = {
+            "case_id": case_id,
+            "slice_indices_dhw": list(slice_indices),
+            "rule": "max_prostate_fp_plus_fn_per_plane; prostate_extent_centre_fallback",
+        }
+    metrics.update({"checkpoint": str(args.checkpoint), "manifest_sha256": manifest_hash, "prostate_label_source": config["prostate_label_source"], "target_shape": config["target_shape"], "patch_size": list(patch_size), "stride": list(stride), "overlap": overlap, "logit_merge_method": "overlap_averaged_logits", "per_patient_inference_seconds": per_patient_seconds, "total_inference_seconds": sum(per_patient_seconds.values()), "mean_patient_inference_seconds": sum(per_patient_seconds.values()) / len(per_patient_seconds), "peak_inference_vram_mb": torch.cuda.max_memory_allocated(device) / 1024**2 if device.type == "cuda" else 0.0, "failure_panels": panel_files, "failure_panel_selection": failure_panel_selection})
     (output / "test_metrics.json").write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return metrics
 
@@ -221,22 +277,30 @@ def render_case_views(
     prediction: torch.Tensor | np.ndarray,
     output_path: Path | str,
     title: str,
+    prostate_label: int,
+    slice_indices: tuple[int, int, int] | None = None,
 ) -> None:
-    """Render axial, coronal and sagittal MRI/label/prediction/error panels."""
+    """Render prostate-specific failure views at the selected error slices."""
 
     image_array, label_array, prediction_array = (_as_volume(value) for value in (image, label, prediction))
     if image_array.shape != label_array.shape or image_array.shape != prediction_array.shape:
         raise ValueError("image, label and prediction must have identical 3D shapes")
-    centre = tuple(dimension // 2 for dimension in image_array.shape)
+    selected = slice_indices or prostate_error_slice_indices(
+        torch.as_tensor(label_array), torch.as_tensor(prediction_array), prostate_label
+    )
+    if len(selected) != 3 or any(index < 0 or index >= size for index, size in zip(selected, image_array.shape, strict=True)):
+        raise ValueError("slice_indices must contain valid axial, coronal and sagittal indices")
     planes = (
-        ("axial", image_array[centre[0]], label_array[centre[0]], prediction_array[centre[0]]),
-        ("coronal", image_array[:, centre[1], :], label_array[:, centre[1], :], prediction_array[:, centre[1], :]),
-        ("sagittal", image_array[:, :, centre[2]], label_array[:, :, centre[2]], prediction_array[:, :, centre[2]]),
+        (f"axial z={selected[0]}", image_array[selected[0]], label_array[selected[0]], prediction_array[selected[0]]),
+        (f"coronal y={selected[1]}", image_array[:, selected[1], :], label_array[:, selected[1], :], prediction_array[:, selected[1], :]),
+        (f"sagittal x={selected[2]}", image_array[:, :, selected[2]], label_array[:, :, selected[2]], prediction_array[:, :, selected[2]]),
     )
     figure, axes = plt.subplots(3, 4, figsize=(14, 10), constrained_layout=True)
     for row, (plane_name, image_plane, label_plane, prediction_plane) in enumerate(planes):
-        false_negative = (label_plane != 0) & (prediction_plane == 0)
-        false_positive = (label_plane == 0) & (prediction_plane != 0)
+        false_positive, false_negative = prostate_error_masks(
+            torch.as_tensor(label_plane), torch.as_tensor(prediction_plane), prostate_label
+        )
+        false_positive, false_negative = false_positive.numpy(), false_negative.numpy()
         panels = (("MRI", image_plane, "gray"), ("ground truth", label_plane, "tab20"), ("prediction", prediction_plane, "tab20"), ("FP / FN", false_positive.astype(int) + 2 * false_negative.astype(int), "coolwarm"))
         for column, (name, panel, colour_map) in enumerate(panels):
             axes[row, column].imshow(panel.T, cmap=colour_map, origin="lower")
