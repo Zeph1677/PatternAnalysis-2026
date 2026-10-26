@@ -15,6 +15,58 @@ from torch.utils.data import Dataset
 
 
 @dataclass(frozen=True)
+class AugmentationConfig:
+    """Probabilities and intensity ranges for training only, after normalization."""
+    lr_flip: float = 0.5
+    ap_flip: float = 0.5
+    noise: float = 0.5
+    blur: float = 0.25
+    gamma: float = 0.25
+    noise_std_max: float = 0.1
+    blur_sigma_min: float = 0.5
+    blur_sigma_max: float = 1.0
+    gamma_min: float = 0.7
+    gamma_max: float = 1.5
+
+    def __post_init__(self):
+        for name in ("lr_flip", "ap_flip", "noise", "blur", "gamma"):
+            if not 0 <= getattr(self, name) <= 1:
+                raise ValueError(f"{name} probability must be in [0, 1]")
+        if not all(np.isfinite(getattr(self, name)) for name in self.__dataclass_fields__):
+            raise ValueError("augmentation values must be finite")
+        if self.noise_std_max < 0 or not 0 < self.blur_sigma_min <= self.blur_sigma_max or not 0 < self.gamma_min <= self.gamma_max:
+            raise ValueError("invalid augmentation intensity ranges")
+
+
+def augment_training_pair(image, mask, config, orientation):
+    """Map anatomical flips through NIfTI axis codes; intensity acts on MRI only."""
+    for codes, probability in (({'L', 'R'}, config.lr_flip), ({'A', 'P'}, config.ap_flip)):
+        axes = [2 - axis for axis, code in enumerate(orientation) if code in codes]
+        if len(axes) != 1:
+            raise ValueError("orientation must identify LR and AP axes uniquely")
+        if torch.rand(()) < probability:
+            image, mask = image.flip((axes[0]+1,)), mask.flip((axes[0],))
+    if torch.rand(()) < config.noise:
+        image = image + torch.randn_like(image) * (torch.rand(()).item() * config.noise_std_max)
+    if torch.rand(()) < config.blur:
+        sigma = config.blur_sigma_min + torch.rand(()).item() * (config.blur_sigma_max-config.blur_sigma_min)
+        radius = int(np.ceil(3*sigma))
+        coordinates = torch.arange(-radius,radius+1, dtype=image.dtype, device=image.device)
+        kernel = torch.exp(-coordinates.square()/(2*sigma*sigma)); kernel /= kernel.sum()
+        value = image[None]
+        for axis in range(3):
+            shape = [1,1,1,1,1]; shape[axis+2] = len(kernel)
+            padding = [0,0,0]; padding[axis] = radius
+            value = F.conv3d(F.pad(value, (padding[2],padding[2],padding[1],padding[1],padding[0],padding[0]), mode="replicate"),kernel.reshape(shape))
+        image = value[0]
+    if torch.rand(()) < config.gamma:
+        exponent = config.gamma_min + torch.rand(()).item() * (config.gamma_max-config.gamma_min)
+        low, high = image.min(), image.max()
+        image = ((image-low)/(high-low).clamp_min(1e-8)).pow(exponent)*(high-low)+low
+    return image.contiguous(), mask.contiguous()
+
+
+@dataclass(frozen=True)
 class VolumePair:
     """A validated image-mask pair stored as paths relative to the HipMRI root."""
 
@@ -180,7 +232,14 @@ class HipMRI3DDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         training_patch_shape: tuple[int, int, int] | None = None,
         foreground_label: int | None = None,
         foreground_probability: float = 0.0,
+        augmentation_config: AugmentationConfig | None = None,
+        split: str = "validation",
     ) -> None:
+        if split not in {"train", "validation", "test"}:
+            raise ValueError("invalid dataset split")
+        if augmentation_config is not None and split != "train":
+            raise ValueError("augmentation is permitted only for train")
+        self.augmentation_config = augmentation_config
         self.records = [pair for pair in pairs if pair.patient_id in patient_ids]
         self.root = Path(data_root).resolve()
         self.num_classes = num_classes
@@ -226,6 +285,8 @@ class HipMRI3DDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             starts = self._sample_patch_starts(mask_tensor)
             slices = tuple(slice(start, start + size) for start, size in zip(starts, self.training_patch_shape))
             image_tensor, mask_tensor = image_tensor[(slice(None), *slices)], mask_tensor[slices]
+        if self.augmentation_config is not None:
+            image_tensor, mask_tensor = augment_training_pair(image_tensor, mask_tensor, self.augmentation_config, pair.orientation)
         return image_tensor, mask_tensor
 
     def _sample_patch_starts(self, mask: torch.Tensor) -> tuple[int, int, int]:
