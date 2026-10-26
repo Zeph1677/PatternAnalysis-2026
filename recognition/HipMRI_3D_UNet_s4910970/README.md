@@ -48,7 +48,7 @@ guarantee that it outperforms the baseline.
 | `modules.py` | Define reusable neural-network modules and 3D U-Net architectures. |
 | `train.py` | Train and validate a declared model configuration. |
 | `predict.py` | Restore a selected checkpoint and generate prediction outputs and metrics. |
-| `utils.py` | Plot saved training histories and validation-selected epochs. |
+| `plot_training.py` | Plot saved training histories, validation-selected epochs, and recorded learning rates. |
 
 `dataset.py` now implements NIfTI pairing, geometry validation, deterministic
 patient-level train/validation/test splits, z-score normalization, optional

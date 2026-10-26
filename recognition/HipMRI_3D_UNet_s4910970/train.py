@@ -1,8 +1,9 @@
-"""Training utilities for fair HipMRI 3D baseline-versus-improved experiments."""
+"""Train and validate HipMRI models; predict.py performs held-out testing explicitly."""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import hashlib
 import json
 import random
@@ -14,9 +15,36 @@ import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
-from dataset import HipMRI3DDataset, VolumePair
-from modules import BaselineUNet3D, ImprovedUNet3D
-from utils import render_training_curves
+from dataset import HipMRI3DDataset, VolumePair, AugmentationConfig
+from modules import build_model
+from plot_training import render_training_curves, render_learning_rate_curve
+
+
+def model_configuration(args: argparse.Namespace, num_classes: int) -> dict[str, object]:
+    """Freeze an unambiguous architecture definition for every new run."""
+
+    model_name = getattr(args, "model", None)
+    version = getattr(args, "architecture_version", None)
+    if model_name == "baseline":
+        if version not in (None, "baseline_v1"):
+            raise ValueError("baseline accepts only architecture-version baseline_v1")
+        version = "baseline_v1"
+    elif model_name == "improved":
+        if version not in ("improved_v1", "improved_context_v2"):
+            raise ValueError(
+                "improved training requires --architecture-version "
+                "improved_v1 or improved_context_v2"
+            )
+    else:
+        raise ValueError("model must be 'baseline' or 'improved'")
+    return {
+        "model": model_name,
+        "architecture_version": version,
+        "num_classes": num_classes,
+        "in_channels": 1,
+        "base_channels": args.base_channels,
+        "dropout_probability": getattr(args, "dropout_probability", 0.3),
+    }
 
 
 def build_experiment_config(
@@ -36,14 +64,14 @@ def build_experiment_config(
         raise ValueError("model name must be 'baseline' or 'improved'")
     if not isinstance(labels, list) or not labels:
         raise ValueError("manifest must define at least one label")
-    if len(target_shape) != 3 or any(size <= 0 or size % 8 for size in target_shape):
-        raise ValueError("target shape must contain three positive dimensions divisible by 8")
+    if len(target_shape) != 3 or any(size < 16 or size % 8 for size in target_shape):
+        raise ValueError("target shape must contain dimensions of at least 16 divisible by 8")
     if isinstance(prostate_label, bool) or prostate_label not in labels:
         raise ValueError("prostate label is outside manifest labels")
     source = prostate_label_source.strip()
     if not source:
         raise ValueError("prostate label source is required")
-    return {
+    config: dict[str, object] = {
         "schema_version": 1,
         "model": model_name,
         "seed": seed,
@@ -54,6 +82,7 @@ def build_experiment_config(
         "manifest_path": str(path),
         "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
+    return config
 
 
 def load_audited_pairs(manifest_path: Path | str) -> tuple[list[VolumePair], dict[str, set[str]], int]:
@@ -189,9 +218,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-root", required=True, type=Path)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/training"))
     parser.add_argument("--model", choices=("baseline", "improved"), default="baseline")
+    parser.add_argument("--architecture-version", choices=("improved_v1", "improved_context_v2"), help="Required for --model improved. Main historical experiment uses improved_v1.")
+    parser.add_argument("--dropout-probability", type=float, default=0.3)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--augmentation", action="store_true", help="Enable train-only augmentation")
+    parser.add_argument("--scheduler", choices=("none", "cosine"), default="none")
+    parser.add_argument("--eta-min", type=float, default=1e-5)
     parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--target-shape", type=int, nargs=3, default=(128, 128, 128))
     parser.add_argument("--seed", type=int, default=42)
@@ -235,8 +269,8 @@ def training_patch_options(args: argparse.Namespace, target_shape: tuple[int, in
             raise ValueError("foreground patch probability requires --train-patch-shape")
         return None, probability
     patch_shape = tuple(raw_shape)
-    if len(patch_shape) != 3 or any(size <= 0 or size % 8 for size in patch_shape):
-        raise ValueError("train patch shape must contain three positive dimensions divisible by 8")
+    if len(patch_shape) != 3 or any(size < 16 or size % 8 for size in patch_shape):
+        raise ValueError("train patch shape must contain dimensions of at least 16 divisible by 8")
     if any(patch > target for patch, target in zip(patch_shape, target_shape)):
         raise ValueError("train patch shape cannot exceed target shape")
     return patch_shape, probability
@@ -301,8 +335,7 @@ def run_overfit_preflight(args: argparse.Namespace) -> dict[str, object]:
     assessment_data = HipMRI3DDataset([pair], args.data_root, {patient_id}, num_classes, target_shape)
     loader = DataLoader(data, batch_size=args.batch_size, shuffle=True)
     assessment_loader = DataLoader(assessment_data, batch_size=1, shuffle=False)
-    model_type = BaselineUNet3D if args.model == "baseline" else ImprovedUNet3D
-    model = model_type(num_classes=num_classes, base_channels=args.base_channels).to(device)
+    model = build_model(model_configuration(args, num_classes)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     output.mkdir(parents=True, exist_ok=True)
     history: list[dict[str, float]] = []
@@ -318,6 +351,7 @@ def run_overfit_preflight(args: argparse.Namespace) -> dict[str, object]:
     prediction = logits.argmax(1).cpu()[0]
     diagnostics = prostate_diagnostics(prediction, target, args.prostate_label)
     summary = {"preflight_only": True, "patient_id": patient_id, "case_id": pair.case_id, "epochs": args.epochs, "optimizer_updates": updates, "evaluation_interval_updates": evaluation_interval, "history": history, "final_train_case_prostate_dice": diagnostics["prostate_dice"], "prostate_label": args.prostate_label, "prostate_label_source": args.prostate_label_source, "prostate_ce_weight": getattr(args, "prostate_ce_weight", 8.0), "prostate_dice_weight": getattr(args, "prostate_dice_weight", 8.0), "train_patch_shape": list(training_patch_shape) if training_patch_shape else None, "foreground_patch_probability": foreground_probability, "model": args.model, "seed": args.seed, "target_shape": list(target_shape), "manifest_sha256": hashlib.sha256(Path(args.manifest).read_bytes()).hexdigest(), **diagnostics}
+    summary.update(model_configuration(args, num_classes))
     _write_json(output / "preflight_summary.json", summary)
     return summary
 
@@ -338,15 +372,22 @@ def run_training(args: argparse.Namespace) -> dict[str, object]:
     config = build_experiment_config(args.manifest, args.model, target_shape, args.seed, args.prostate_label, args.prostate_label_source)
     pairs, split_ids, num_classes = load_audited_pairs(args.manifest)
     device = torch.device(args.device)
-    train_data = HipMRI3DDataset(pairs, args.data_root, split_ids["train"], num_classes, target_shape, training_patch_shape, args.prostate_label, foreground_probability)
+    augmentation = AugmentationConfig() if getattr(args, "augmentation", False) else None
+    scheduler_name = getattr(args, "scheduler", "none")
+    eta_min = getattr(args, "eta_min", 1e-5)
+    if scheduler_name not in {"none", "cosine"} or not 0 <= eta_min <= args.learning_rate:
+        raise ValueError("invalid scheduler or eta_min")
+    train_data = HipMRI3DDataset(pairs, args.data_root, split_ids["train"], num_classes, target_shape, training_patch_shape, args.prostate_label, foreground_probability, augmentation_config=augmentation, split="train")
     validation_data = HipMRI3DDataset(pairs, args.data_root, split_ids["validation"], num_classes, target_shape)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
     validation_loader = DataLoader(validation_data, batch_size=args.batch_size, shuffle=False)
-    model_type = BaselineUNet3D if args.model == "baseline" else ImprovedUNet3D
-    model = model_type(num_classes=num_classes, base_channels=args.base_channels).to(device)
+    config.update(model_configuration(args, num_classes))
+    model = build_model(config).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=eta_min) if scheduler_name == "cosine" else None
     output.mkdir(parents=True, exist_ok=True)
     config.update({"device": str(device), "epochs": args.epochs, "batch_size": args.batch_size, "learning_rate": args.learning_rate, "base_channels": args.base_channels, "prostate_ce_weight": getattr(args, "prostate_ce_weight", 8.0), "prostate_dice_weight": getattr(args, "prostate_dice_weight", 8.0), "train_patch_shape": list(training_patch_shape) if training_patch_shape else None, "foreground_patch_probability": foreground_probability, "selection_metric": selection_metric})
+    config.update({"augmentation_config": asdict(augmentation) if augmentation else None, "validation_augmentation": False, "test_augmentation": False, "scheduler": scheduler_name, "eta_min": eta_min, "scheduler_t_max": args.epochs, "lr_recording": "rate used for this epoch, scheduler steps after epoch"})
     _write_json(output / "experiment_config.json", config)
     history: list[dict[str, float]] = []
     started = time.perf_counter()
@@ -360,6 +401,7 @@ def run_training(args: argparse.Namespace) -> dict[str, object]:
         validation = evaluate_3d_batches(model, validation_loader, device, num_classes, args.prostate_label, [pair.patient_id for pair in validation_data.records])
         row = {
             "epoch": float(epoch),
+            "learning_rate": float(optimizer.param_groups[0]["lr"]),
             "train_loss": train_loss,
             "train_seconds": train_seconds,
             "validation_mean_dice": float(validation["mean_dice"]),
@@ -374,8 +416,12 @@ def run_training(args: argparse.Namespace) -> dict[str, object]:
         }
         history.append(row)
         _write_json(output / "history.json", history)
+        render_training_curves({args.model: history}, output / "training_curves.png", selection_metric)
+        render_learning_rate_curve({args.model: history}, output / "learning_rate_schedule.png")
+        if scheduler is not None:
+            scheduler.step()
         if select_validation_checkpoint(history, selection_metric)["epoch"] == row["epoch"]:
-            torch.save({"model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "epoch": epoch, "config": config}, output / "best.pt")
+            torch.save({"model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "scheduler_state_dict": scheduler.state_dict() if scheduler else None, "epoch": epoch, "config": config}, output / "best.pt")
     selected = select_validation_checkpoint(history, selection_metric)
     summary = {
         "selected_epoch": selected["epoch"],
@@ -388,7 +434,6 @@ def run_training(args: argparse.Namespace) -> dict[str, object]:
         "history": history,
     }
     _write_json(output / "training_summary.json", summary)
-    render_training_curves({args.model: history}, output / "training_curves.png", selection_metric)
     return summary
 
 
