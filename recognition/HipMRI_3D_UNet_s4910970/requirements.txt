@@ -1,5 +1,5 @@
-# Direct dependencies verified locally with Python 3.11 on 2026-10-28.
-# Formal Rangpur jobs 701809 and 701810 used PyTorch 2.13.0+cu130.
+# Direct dependencies verified locally on 2026-10-27.
+# Rangpur formal jobs 701809 and 701810 used PyTorch 2.13.0+cu130.
 torch==2.11.0
 numpy==2.4.2
 nibabel==5.4.2
