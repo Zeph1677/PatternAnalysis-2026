@@ -15,8 +15,8 @@ import torch
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from modules import build_model
 from dataset import HipMRI3DDataset
+from modules import build_model
 from train import load_audited_pairs
 
 
@@ -62,7 +62,7 @@ def load_checkpoint_model(checkpoint_path: Path | str, device: torch.device) -> 
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = checkpoint.get("config")
     if not isinstance(config, dict):
-        raise ValueError("checkpoint is missing experiment config")
+        raise TypeError("checkpoint is missing experiment config")
     model = build_model(config).to(device)
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     model.eval()
