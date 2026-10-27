@@ -95,8 +95,12 @@ with torch.no_grad():
 Run these commands from this project directory:
 
 ```powershell
-python -m pip install torch numpy nibabel matplotlib
+python -m pip install -r requirements.txt
 ```
+
+Python 3.11 and the pinned direct dependencies in `requirements.txt` were
+verified locally. The formal Rangpur runs used PyTorch 2.13.0+cu130; the pinned
+PyTorch 2.11.0 package records the separately verified local environment.
 
 The data root must contain `semantic_MRs/` and `semantic_labels_only/`.
 Create the audited, patient-disjoint manifest before training:
