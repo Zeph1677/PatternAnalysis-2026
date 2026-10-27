@@ -7,7 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from dataset import VolumePair, build_patient_split_manifest, discover_volume_pairs, validate_patient_split_manifest
+from dataset import (
+    VolumePair,
+    build_patient_split_manifest,
+    discover_volume_pairs,
+    validate_patient_split_manifest,
+)
 
 
 def build_dataset_manifest(pairs: list[VolumePair], seed: int = 42) -> dict[str, Any]:
