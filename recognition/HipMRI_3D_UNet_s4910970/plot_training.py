@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 
 History = list[dict[str, object]]
 
@@ -101,24 +101,6 @@ def render_training_curves(histories: Mapping[str, History], output_path: Path |
     plt.close(figure)
 
 
-def render_learning_rate_curve(histories: Mapping[str, History], output_path: Path | str) -> None:
-    """Render only recorded rates; historical missing rates are never invented."""
-
-    for label, history in histories.items():
-        if not history or any("learning_rate" not in row or "epoch" not in row for row in history):
-            raise ValueError(f"{label} lacks recorded learning_rate")
-    figure, axis = plt.subplots(figsize=(7, 4), constrained_layout=True)
-    for label, history in histories.items():
-        axis.plot([row["epoch"] for row in history], [row["learning_rate"] for row in history], marker="o", label=label)
-    axis.set(xlabel="Epoch", ylabel="Learning rate used", title="Recorded optimizer learning rate")
-    axis.grid(alpha=0.25)
-    axis.legend()
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, dpi=180)
-    plt.close(figure)
-
-
 def create_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", action="append", required=True, type=Path, help="JSON history or training summary; repeat for each series")
@@ -138,6 +120,21 @@ def main() -> None:
     if args.lr_output is not None:
         render_learning_rate_curve(histories, args.lr_output)
 
+
+
+
+def render_learning_rate_curve(histories, output_path):
+    """Render only recorded rates; historical missing rates are never invented."""
+    for label, history in histories.items():
+        if not history or any("learning_rate" not in row or "epoch" not in row for row in history):
+            raise ValueError(f"{label} lacks recorded learning_rate")
+    figure, axis = plt.subplots(figsize=(7,4), constrained_layout=True)
+    for label, history in histories.items():
+        axis.plot([row["epoch"] for row in history], [row["learning_rate"] for row in history], marker="o", label=label)
+    axis.set(xlabel="Epoch", ylabel="Learning rate used", title="Recorded optimizer learning rate")
+    axis.grid(alpha=0.25); axis.legend()
+    output = Path(output_path); output.parent.mkdir(parents=True,exist_ok=True)
+    figure.savefig(output,dpi=180); plt.close(figure)
 
 if __name__ == "__main__":
     main()

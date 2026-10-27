@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 import hashlib
 import json
 import random
 import time
+from collections.abc import Iterable
+from dataclasses import asdict
 from pathlib import Path
-from typing import Iterable
 
 import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
-from dataset import HipMRI3DDataset, VolumePair, AugmentationConfig
+from dataset import AugmentationConfig, HipMRI3DDataset, VolumePair
 from modules import build_model
-from plot_training import render_training_curves, render_learning_rate_curve
+from plot_training import render_learning_rate_curve, render_training_curves
 
 
 def model_configuration(args: argparse.Namespace, num_classes: int) -> dict[str, object]:
