@@ -95,7 +95,7 @@ Run the following commands from this directory.
 python -m pip install -r requirements.txt
 ```
 
-Python `3.11` and the exact direct package versions in `requirements.txt` were used for local verification. The formal Rangpur jobs used PyTorch `2.13.0+cu130`, whereas the locally verified package is PyTorch `2.11.0` (CUDA `12.8` on the verification machine). The submitted code preserves the model architectures and evaluation procedure used by the formal jobs. 
+Python `3.11` and the exact direct package versions in `requirements.txt` were used for local verification. The formal Rangpur jobs used PyTorch `2.13.0+cu130`, whereas the locally verified package is PyTorch `2.11.0` (CUDA `12.8` on the verification machine). The submitted code preserves the model architectures and evaluation procedure used by the formal jobs.
 
 ### 6.2 Audit the dataset
 
@@ -173,7 +173,7 @@ The script verifies that both result sets share the manifest, prostate label and
 
 The two formal runs used the frozen manifest, identical preprocessing, seed, batch size, 20-epoch budget, optimiser, class-weighted loss, and inference procedure. The submitted model architectures are unchanged from Rangpur job `701809` (Baseline) and job `701810` (Improved) Both formal jobs completed successfully with Slurm state `COMPLETED` and exit code `0:0`.
 
-The saved checkpoints were independently rerun locally against the same manifest and 19 held-out volumes. Baseline checkpoint produced patient-mean prostate Dice `0.811522`, a difference of `-0.000026` from the formal value. Improved checkpoint produced `0.813634`, a difference of `+0.000047`. 
+The saved checkpoints were independently rerun locally against the same manifest and 19 held-out volumes. Baseline checkpoint produced patient-mean prostate Dice `0.811522`, a difference of `-0.000026` from the formal value. Improved checkpoint produced `0.813634`, a difference of `+0.000047`.
 
 Both independent results remain above the Hard-option target; small numerical differences and inference timing are hardware- and software-environment dependent.
 
@@ -293,7 +293,7 @@ For this case, the prostate Dice is `0.839755`. The animation is a qualitative v
 
 Both architectures were implemented, trained, and evaluated under the same patient-disjoint protocol, and both exceed the Hard-option target. Improved achieved a slightly higher patient-mean prostate Dice (`0.813587` versus `0.811548`) as well as higher scan-mean Dice and IoU for each reported class. The patient-level gain is only `0.002038`, varies by patient, and includes a `0.062061` regression for B037. Improved also required approximately 22% more peak training GPU memory, while measured inference time was nearly unchanged.
 
-The evidence does not justify replacing Baseline as the default operational drafting model. Improved is a useful research candidate because it removes disconnected prostate components and slightly raises aggregate overlap, but the gain is small, training memory is higher, and the B037 regression shows weaker worst-case reliability. Baseline is therefore the more conservative default for this prototype. 
+The evidence does not justify replacing Baseline as the default operational drafting model. Improved is a useful research candidate because it removes disconnected prostate components and slightly raises aggregate overlap, but the gain is small, training memory is higher, and the B037 regression shows weaker worst-case reliability. Baseline is therefore the more conservative default for this prototype.
 
 ## 12. References
 
