@@ -142,12 +142,27 @@ The best checkpoint is selected with validation performance only; the held-out t
 
 ### 6.5 Evaluate a selected checkpoint
 
+Evaluate the Baseline checkpoint:
+
 ```bash
 python predict.py \
   --checkpoint artifacts/baseline/best.pt \
   --manifest artifacts/dataset_manifest.json \
   --data-root data/HipMRI_Study_open \
   --output-dir artifacts/baseline_test \
+  --patch-size 128 128 128 \
+  --stride 64 64 64 \
+  --device cuda
+```
+
+Evaluate the Improved checkpoint with a separate output directory:
+
+```bash
+python predict.py \
+  --checkpoint artifacts/improved/best.pt \
+  --manifest artifacts/dataset_manifest.json \
+  --data-root data/HipMRI_Study_open \
+  --output-dir artifacts/improved_test \
   --patch-size 128 128 128 \
   --stride 64 64 64 \
   --device cuda
@@ -171,7 +186,7 @@ The script verifies that both result sets share the manifest, prostate label and
 
 ## 7. Experimental protocol
 
-The two formal runs used the frozen manifest, identical preprocessing, seed, batch size, 20-epoch budget, optimiser, class-weighted loss, and inference procedure. The submitted model architectures are unchanged from Rangpur job `701809` (Baseline) and job `701810` (Improved) Both formal jobs completed successfully with Slurm state `COMPLETED` and exit code `0:0`.
+The two formal runs used the frozen manifest, identical preprocessing, seed, batch size, 20-epoch budget, optimiser, class-weighted loss, and inference procedure. The submitted model architectures are unchanged from Rangpur job `701809` (Baseline) and job `701810` (Improved). Both formal jobs completed successfully with Slurm state `COMPLETED` and exit code `0:0`.
 
 The saved checkpoints were independently rerun locally against the same manifest and 19 held-out volumes. Baseline checkpoint produced patient-mean prostate Dice `0.811522`, a difference of `-0.000026` from the formal value. Improved checkpoint produced `0.813634`, a difference of `+0.000047`.
 
@@ -215,12 +230,12 @@ Improved is higher for every scan-mean class metric. This does not contradict th
 
 ### 8.3 Computational cost
 
-Peak memory is allocated GPU memory. Inference time is cumulative model-execution time per preprocessed held-out patient.
+Peak memory is allocated GPU memory. Inference time is cumulative model-execution time over the 19 preprocessed held-out scans. Mean per-scan time is the total divided by 19; mean per-patient time is the same total divided by the five held-out patients.
 
-| Model    | Parameters | Peak train VRAM | Peak inference VRAM | Training time | Mean inference / patient |
-| -------- | ---------: | --------------: | ------------------: | ------------: | -----------------------: |
-| Baseline |  1,400,646 |       977.6 MiB |         1,047.4 MiB |     1,369.1 s |               0.248920 s |
-| Improved |  1,423,106 |     1,193.4 MiB |         1,047.5 MiB |     1,388.2 s |               0.249449 s |
+| Model    | Parameters | Peak train VRAM | Peak inference VRAM | Training time | Mean inference / scan | Mean inference / patient |
+| -------- | ---------: | --------------: | ------------------: | ------------: | --------------------: | -----------------------: |
+| Baseline |  1,400,646 |       977.6 MiB |         1,047.4 MiB |     1,369.1 s |            0.065505 s |               0.248920 s |
+| Improved |  1,423,106 |     1,193.4 MiB |         1,047.5 MiB |     1,388.2 s |            0.065644 s |               0.249449 s |
 
 Improved adds 22,460 parameters and uses approximately 22% more peak training memory. Inference memory and measured model-execution time are effectively unchanged.
 
