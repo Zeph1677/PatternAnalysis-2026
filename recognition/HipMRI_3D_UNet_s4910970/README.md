@@ -1,6 +1,6 @@
 # COMP3710 Assignment 1 — 3D Improved U-Net Segmentation
 
-**Student:** Haoyun Jiang(4910970)
+**Student:** Haoyun Jiang(49109706)
 **Option:** Hard — 3D Improved U-Net
 
 ## 1. Project overview
